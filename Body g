@@ -1,0 +1,181 @@
+!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/stats.min.js"></script>
+    <script>
+        
+                let scene, camera, renderer, lines, stats;
+        const nodes = [];
+        const mouse = new THREE.Vector2();
+        const INTERACTION_RADIUS = 8;
+        const LINE_DENSITY = 200;
+        const PHYSICS_ITERATIONS = 3;
+
+        class Node {
+            constructor(pos) {
+                this.position = pos.clone();
+                this.original = pos.clone();
+                this.velocity = new THREE.Vector3();
+                this.force = new THREE.Vector3();
+            }
+        }
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            
+            stats = new Stats();
+            document.body.appendChild(stats.dom);
+
+            
+            const ambient = new THREE.AmbientLight(0x444444);
+            scene.add(ambient);
+            const light = new THREE.PointLight(0x00ff88, 1, 100);
+            light.position.set(0, 0, 50);
+            scene.add(light);
+
+            createNetwork();
+            camera.position.z = 40;
+            document.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onResize);
+        }
+
+        function createNetwork() {
+            
+            const geometry = new THREE.IcosahedronGeometry(0.3, 1);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x00ff88,
+                emissive: 0x003300,
+                shininess: 100
+            });
+
+            
+            for(let i = 0; i < LINE_DENSITY; i++) {
+                const pos = new THREE.Vector3(
+                    (Math.random() - 0.5) * 40,
+                    (Math.random() - 0.5) * 40,
+                    (Math.random() - 0.5) * 40
+                );
+                nodes.push(new Node(pos));
+                
+                const nodeMesh = new THREE.Mesh(geometry, material);
+                nodeMesh.position.copy(pos);
+                scene.add(nodeMesh);
+            }
+
+            
+            const lineGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(LINE_DENSITY * LINE_DENSITY * 3);
+            lineGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0x00ff88,
+                transparent: true,
+                opacity: 0.15,
+                blending: THREE.AdditiveBlending
+            });
+
+            lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+            scene.add(lines);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function updatePhysics() {
+            const mouseWorld = new THREE.Vector3(
+                mouse.x * 30,
+                mouse.y * 20,
+                camera.position.z
+            );
+
+            
+            for(let iter = 0; iter < PHYSICS_ITERATIONS; iter++) {
+                nodes.forEach(node => {
+                    node.force.set(0, 0, 0);
+
+                    
+                    const toMouse = mouseWorld.clone().sub(node.position);
+                    const mouseDist = toMouse.length();
+                    if(mouseDist < INTERACTION_RADIUS) {
+                        const strength = (1 - mouseDist/INTERACTION_RADIUS) * 0.4;
+                        node.force.add(toMouse.normalize().multiplyScalar(strength));
+                    }
+
+                    
+                    const toOriginal = node.original.clone().sub(node.position);
+                    node.force.add(toOriginal.multiplyScalar(0.02));
+
+                    
+                    nodes.forEach(other => {
+                        if(node !== other) {
+                            const diff = node.position.clone().sub(other.position);
+                            const dist = diff.length();
+                            if(dist < 3) {
+                                node.force.add(diff.normalize().multiplyScalar(0.01 * (1 - dist/3)));
+                            }
+                        }
+                    });
+
+                    
+                    node.velocity.add(node.force.multiplyScalar(0.5));
+                    node.velocity.multiplyScalar(0.92);
+                    node.position.add(node.velocity);
+                });
+            }
+
+            
+            const positions = lines.geometry.attributes.position.array;
+            let index = 0;
+            
+            nodes.forEach((nodeA, i) => {
+                nodes.slice(i + 1).forEach(nodeB => {
+                    const dist = nodeA.position.distanceTo(nodeB.position);
+                    if(dist < 10 && Math.random() < 0.4) {
+                        positions[index++] = nodeA.position.x;
+                        positions[index++] = nodeA.position.y;
+                        positions[index++] = nodeA.position.z;
+                        positions[index++] = nodeB.position.x;
+                        positions[index++] = nodeB.position.y;
+                        positions[index++] = nodeB.position.z;
+                    }
+                });
+            });
+
+            lines.geometry.setDrawRange(0, index/3);
+            lines.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            stats.begin();
+            updatePhysics();
+            renderer.render(scene, camera);
+            stats.end();
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
